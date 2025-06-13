@@ -1,119 +1,74 @@
-# dnssec
+# dnssec_pqc
+This is a **plugin of CoreDNS** that integrates support for **Post-Quantum Cryptography (PQC)** signature algorithms. It is intended for research and testing purposes within the context of DNSSEC and PQC algorithm evaluation.
 
-## Name
 
-*dnssec* - enables on-the-fly DNSSEC signing of served data.
+## PQC DNSSEC Plugin
 
-## Description
+The `dnssec_pqc` plugin extends CoreDNS to allow DNSSEC zone signing and validation using a set of post-quantum signature algorithms. It builds upon the original `dnssec` plugin by replacing or augmenting cryptographic operations with post-quantum alternatives. 
 
-With *dnssec*, any reply that doesn't (or can't) do DNSSEC will get signed on the fly. Authenticated
-denial of existence is implemented with NSEC black lies. Using ECDSA as an algorithm is preferred as
-this leads to smaller signatures (compared to RSA). NSEC3 is *not* supported.
+### Supported Algorithms and Identifiers
 
-This plugin can only be used once per Server Block.
+The plugin currently supports the following post-quantum signature schemes, identified by custom algorithm IDs:
 
-## Syntax
+## Supported Algorithms
+| Algorithm        | ID |
+|------------------|----|
+| FALCON512        | 17 |
+| DILITHIUM2       | 18 |
+| SPHINCS_SHA2     | 19 |
+| MAYO1            | 20 |
+| SNOVA            | 21 |
+| FALCON1024       | 27 |
+| DILITHIUM3       | 28 |
+| SPHINCS_SHAKE    | 29 |
+| MAYO3            | 30 |
+| SNOVASHAKE       | 31 |
+| FALCONPADDED512  | 37 |
+| DILITHIUM5       | 38 |
+| FALCONPADDED1024 | 47 |
 
-~~~
-dnssec [ZONES... ] {
-    key file|aws_secretsmanager KEY...
-    cache_capacity CAPACITY
-}
-~~~
+## Dependencies
 
-The signing behavior depends on the keys specified. If multiple keys are specified of which there is
-at least one key with the SEP bit set and at least one key with the SEP bit unset, signing will happen
-in split ZSK/KSK mode. DNSKEY records will be signed with all keys that have the SEP bit set. All other
-records will be signed with all keys that do not have the SEP bit set.
+TThis plugin depends on a custom version of the miekg/dns library, which has been modified to support PQC extensions.
+  
+> https://github.com/qursa-uc3m/dns  
+> Branch: `pqcintegrated`
 
-In any other case, each specified key will be treated as a CSK (common signing key), forgoing the
-ZSK/KSK split. All signing operations are done online.
-Authenticated denial of existence is implemented with NSEC black lies. Using ECDSA as an algorithm
-is preferred as this leads to smaller signatures (compared to RSA). NSEC3 is *not* supported.
+To use this version, the following replacement must be added to the go.mod file of CoreDNS:
 
-As the *dnssec* plugin can't see the original TTL of the RRSets it signs, it will always use 3600s
-as the value.
+```bash
+replace github.com/miekg/dns => github.com/qursa-uc3m/dns pqcintegrated
+```
+This enables PQC support.
 
-If multiple *dnssec* plugins are specified in the same zone, the last one specified will be
-used.
 
-* **ZONES** zones that should be signed. If empty, the zones from the configuration block
-    are used.
 
-* `key file` indicates that **KEY** file(s) should be read from disk. When multiple keys are specified, RRsets
-  will be signed with all keys. Generating a key can be done with `dnssec-keygen`: `dnssec-keygen -a
-  ECDSAP256SHA256 <zonename>`. A key created for zone *A* can be safely used for zone *B*. The name of the
-  key file can be specified in one of the following formats
+## Installation
 
-    * basename of the generated key `Kexample.org+013+45330`
-    * generated public key `Kexample.org+013+45330.key`
-    * generated private key `Kexample.org+013+45330.private`
+To install, you need the fork that includes this plugin because it uses the custom library and enables the plugin within CoreDNS. Although you could apply these changes manually, the recommended process to use this plugin is: 
 
-* `key aws_secretsmanager` indicates that **KEY** secret(s) should be read from AWS Secrets Manager. Secret
-  names or ARNs may be used. After generating the keys as described in the `key file` section, you can
-  store them in AWS Secrets Manager using the following AWS CLI v2 command:
+```bash
+git clone https://github.com/Juligent/coredns
+cd coredns
+go mod tidy
+go clean
+go build
+```
 
-  ```sh
-  aws secretsmanager create-secret --name "Kexample.org.+013+45330" \
-  --description "DNSSEC keys for example.org" \
-  --secret-string "$(jq -n --arg key "$(cat Kexample.org.+013+45330.key)" \
-  --arg private "$(cat Kexample.org.+013+45330.private)" \
-  '{key: $key, private: $private}')"
-  ```
+## Configuration example of the Corefile
 
-  This command reads the contents of the `.key` and `.private` files, constructs a JSON object, and stores it
-  as a new secret in AWS Secrets Manager with the specified name and description. CoreDNS will then fetch
-  the key data from AWS Secrets Manager when using the `key aws_secretsmanager` directive.
 
-  [AWS SDK for Go V2](https://aws.github.io/aws-sdk-go-v2/docs/configuring-sdk/#specifying-credentials) is used
-  for authentication with AWS Secrets Manager. Make sure the provided AWS credentials have the necessary
-  permissions (e.g., `secretsmanager:GetSecretValue`) to access the specified secrets in AWS Secrets Manager.
-
-* `cache_capacity` indicates the capacity of the cache. The dnssec plugin uses a cache to store
-  RRSIGs. The default for **CAPACITY** is 10000.
-
-## Metrics
-
-If monitoring is enabled (via the *prometheus* plugin) then the following metrics are exported:
-
-* `coredns_dnssec_cache_entries{server, type}` - total elements in the cache, type is "signature".
-* `coredns_dnssec_cache_hits_total{server}` - Counter of cache hits.
-* `coredns_dnssec_cache_misses_total{server}` - Counter of cache misses.
-
-The label `server` indicated the server handling the request, see the *metrics* plugin for details.
-
-## Examples
-
-Sign responses for `example.org` with the key "Kexample.org.+013+45330.key".
-
-~~~ corefile
-example.org {
+```bash
+example.org:1053 {
     dnssec {
-        key file Kexample.org.+013+45330
+        key file <your_path>/dnssec_test/Kexample.org.+XXX+XXXXX
     }
-    whoami
+    forward . 8.8.8.8
+    log
 }
-~~~
-
-Sign responses for `example.org` with the key stored in AWS Secrets Manager under the secret name
-"Kexample.org.+013+45330".
-
-~~~
-example.org {
-    dnssec {
-        key aws_secretsmanager Kexample.org.+013+45330
-    }
-    whoami
+.:1053 {
+    forward . 8.8.8.8
+    log
 }
-~~~
+```
 
-Sign responses for a kubernetes zone with the key "Kcluster.local+013+45129.key".
-
-~~~
-cluster.local {
-    kubernetes
-    dnssec {
-      key file Kcluster.local+013+45129
-    }
-}
-~~~
