@@ -1,16 +1,15 @@
-# dnssec_pqc
-This is a **plugin of CoreDNS** that integrates support for **Post-Quantum Cryptography (PQC)** signature algorithms. It is intended for research and testing purposes within the context of DNSSEC and PQC algorithm evaluation.
+# DNSSEC PQC Plugin for CoreDNS
 
+This is a **plugin of CoreDNS** that integrates support for **Post-Quantum Cryptography (PQC)** signature algorithms. It is intended for research and testing purposes within the context of DNSSEC and PQC algorithm evaluation.
 
 ## PQC DNSSEC Plugin
 
-The `dnssec_pqc` plugin extends CoreDNS to allow DNSSEC zone signing and validation using a set of post-quantum signature algorithms. It builds upon the original `dnssec` plugin by replacing or augmenting cryptographic operations with post-quantum alternatives. 
+The `dnssec_pqc` plugin extends CoreDNS to allow DNSSEC zone signing and validation using a set of post-quantum signature algorithms. It builds upon the original `dnssec` plugin by replacing or augmenting cryptographic operations with post-quantum alternatives.
 
-### Supported Algorithms and Identifiers
+## Supported Algorithms and Identifiers
 
 The plugin currently supports the following post-quantum signature schemes, identified by custom algorithm IDs:
 
-## Supported Algorithms
 | Algorithm        | ID |
 |------------------|----|
 | FALCON512        | 17 |
@@ -29,34 +28,37 @@ The plugin currently supports the following post-quantum signature schemes, iden
 
 ## Dependencies
 
-TThis plugin depends on a custom version of the miekg/dns library, which has been modified to support PQC extensions.
-  
-> https://github.com/qursa-uc3m/dns  
-> Branch: `pqcintegrated`
+TThis plugin depends on a custom version of the `miekg/dns` library, that can be found at [qursa-uc3m/dns](https://github.com/qursa-uc3m/dns), which has been modified to support PQC extensions.
 
-To use this version, the following replacement must be added to the go.mod file of CoreDNS:
+To use this version, the following replacement must be added to the `go.mod` file of CoreDNS:
 
 ```bash
-replace github.com/miekg/dns => github.com/qursa-uc3m/dns pqcintegrated
+replace github.com/miekg/dns => github.com/qursa-uc3m/dns
 ```
-This enables PQC support.
-
-
 
 ## Installation
 
-To install, you need the fork that includes this plugin because it uses the custom library and enables the plugin within CoreDNS. Although you could apply these changes manually, the recommended process to use this plugin is: 
+You can install the plugin using the provided scripts, which will handle the installation of the required dependencies and CoreDNS with the PQC plugin enabled.
+
+First ensure you have `liboqs` installed:
 
 ```bash
-git clone https://github.com/Juligent/coredns
-cd coredns
-go mod tidy
-go clean
-go build
+./scripts/install_liboqs.sh
 ```
 
-## Configuration example of the Corefile
+This installs the `liboqs` version `0.12.0` by default.
 
+and then install CoreDNS with PQC plugin:
+
+```bash
+./scripts/install_coredns.sh
+```
+
+This modifies the CoreDNS source code on the fly to include the PQC plugin and the necessary dependencies. For reference, you can examine the manual approach used in [Juligent/coredns](https://github.com/Juligent/coredns).
+
+## Example Configuration
+
+To configure CoreDNS to use the PQC plugin, you can create a `Corefile` with the following content. This example assumes you have a DNSSEC key file for your domain and that you want to forward queries to Google's public DNS server:
 
 ```bash
 example.org:1053 {
@@ -71,4 +73,3 @@ example.org:1053 {
     log
 }
 ```
-
