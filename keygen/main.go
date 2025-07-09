@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -12,91 +13,116 @@ import (
 )
 
 func main() {
-	sigs := oqs.SupportedSigs()
-	fmt.Println("Algoritmos de firma soportados por liboqs:")
-	for _, sig := range sigs {
-		fmt.Println(" -", sig)
-	}
+	// Define flags
+	domain := flag.String("domain", "mydomain.org", "Domain name for key generation")
+	algName := flag.String("algorithm", "", "PQC algorithm name (required)")
+	algorithmNumber := flag.String("number", "", "Algorithm number/ID (required)")
+	help := flag.Bool("help", false, "Show help and available algorithms")
 
-	enabled := oqs.EnabledSigs()
-	fmt.Println("Algoritmos de firma habilitados en esta instalación:")
-	for _, alg := range enabled {
-		fmt.Println(" -", alg)
-	}
+	flag.Parse()
 
-	// Dominio para el que se generan las claves
-	domain := "mydomain.org"
-	// Código de algoritmo que CoreDNS espera
-	algorithmNumber := "031"
-	// Nombre del algoritmo en OQS
-	algName := "SNOVA_24_5_4_SHAKE"
+	// Show help if requested or if required parameters are missing
+	if *help || *algName == "" || *algorithmNumber == "" {
+		if *help {
+			fmt.Println("PQC DNSSEC Key Generator")
+			fmt.Println("========================")
+		}
+
+		flag.Usage()
+
+		// Show available algorithms
+		sigs := oqs.SupportedSigs()
+		fmt.Println("\nSupported signature algorithms:")
+		for _, sig := range sigs {
+			fmt.Println(" -", sig)
+		}
+
+		enabled := oqs.EnabledSigs()
+		fmt.Println("\nEnabled signature algorithms:")
+		for _, alg := range enabled {
+			fmt.Println(" -", alg)
+		}
+
+		fmt.Println("\nExamples:")
+		fmt.Println("  ./keygen -algorithm SNOVA_24_5_4_SHAKE -number 31")
+		fmt.Println("  ./keygen -domain example.com -algorithm FALCON512 -number 17")
+		fmt.Println("  ./keygen -algorithm DILITHIUM2 -number 18 -domain test.org")
+
+		if *algName == "" || *algorithmNumber == "" {
+			os.Exit(1)
+		}
+		return
+	}
 
 	var sig oqs.Signature
-	err := sig.Init(algName, nil)
+	err := sig.Init(*algName, nil)
 	if err != nil {
-		fmt.Println("Error al inicializar el mecanismo de firma:", err)
+		fmt.Println("Error initializing signature mechanism:", err)
 		return
 	}
 	defer sig.Clean()
 
-	// Genera el par de claves
+	// Generate key pair
 	publicKey, err := sig.GenerateKeyPair()
 	if err != nil {
-		fmt.Println("Error al generar el par de claves:", err)
+		fmt.Println("Error generating key pair:", err)
 		return
 	}
 	secretKey := sig.ExportSecretKey()
 
-	// Calcular el Key ID a partir de la clave pública
+	// Calculate Key ID from public key
 	keyID := generateKeyID(publicKey)
 
-	// Convertir la clave pública a Base64 para incluirla en el registro DNSKEY
+	// Convert public key to Base64 for DNSKEY record
 	publicKeyBase64 := base64.StdEncoding.EncodeToString(publicKey)
 
-	// Formatear el registro DNSKEY (para el archivo .key)
+	// Format DNSKEY record (for .key file)
 	publicKeyContent := fmt.Sprintf("; This is a DNSKEY record\n%s. IN DNSKEY 257 3 %s %s\n",
-		domain, algorithmNumber, publicKeyBase64)
+		*domain, *algorithmNumber, publicKeyBase64)
 
-	// Generar las fechas de creación, publicación y activación en formato YYYYMMDDhhmmss
+	// Generate creation, publication and activation timestamps in YYYYMMDDhhmmss format
 	now := time.Now().UTC().Format("20060102150405")
 
-	// Convertir la clave privada a Base64
+	// Convert private key to Base64
 	privateKeyBase64 := base64.StdEncoding.EncodeToString(secretKey)
 
-	// Formatear el fichero privado en formato similar al que genera BIND
+	// Format private key file in BIND-like format
 	privateKeyContent := fmt.Sprintf(`Private-key-format: v1.3
 Algorithm: %s
 Created: %s
 Publish: %s
 Activate: %s
 PrivateKey: %s
-`, algorithmNumber, now, now, now, privateKeyBase64)
+`, *algorithmNumber, now, now, now, privateKeyBase64)
 
-	// Formatear los nombres de los ficheros siguiendo la convención:
-	// K<dominio>+<número de algoritmo>+<keyID>.key y .private
-	publicFileName := fmt.Sprintf("K%s+%s+%d.key", domain, algorithmNumber, keyID)
-	privateFileName := fmt.Sprintf("K%s+%s+%d.private", domain, algorithmNumber, keyID)
+	// Format file names following convention:
+	// K<domain>+<algorithm_number>+<keyID>.key and .private
+	publicFileName := fmt.Sprintf("K%s+%s+%d.key", *domain, *algorithmNumber, keyID)
+	privateFileName := fmt.Sprintf("K%s+%s+%d.private", *domain, *algorithmNumber, keyID)
 
-	// Guardar la clave pública (texto) en el archivo .key
+	// Save public key (text) to .key file
 	err = os.WriteFile(publicFileName, []byte(publicKeyContent), 0644)
 	if err != nil {
-		fmt.Println("Error al guardar la clave pública:", err)
+		fmt.Println("Error saving public key:", err)
 		return
 	}
 
-	// Guardar la clave privada en formato textual (BIND-like)
+	// Save private key in textual format (BIND-like)
 	err = os.WriteFile(privateFileName, []byte(privateKeyContent), 0600)
 	if err != nil {
-		fmt.Println("Error al guardar la clave privada:", err)
+		fmt.Println("Error saving private key:", err)
 		return
 	}
 
-	fmt.Println("Claves generadas correctamente:")
-	fmt.Println("Clave pública:", publicFileName)
-	fmt.Println("Clave privada:", privateFileName)
+	fmt.Println("Keys generated successfully:")
+	fmt.Println("Domain:", *domain)
+	fmt.Println("Algorithm:", *algName)
+	fmt.Println("Algorithm Number:", *algorithmNumber)
+	fmt.Println("Public key:", publicFileName)
+	fmt.Println("Private key:", privateFileName)
 }
 
-// generateKeyID calcula el Key ID tomando los primeros 2 bytes del hash SHA-256 de la clave pública
+// generateKeyID calculates the Key ID by taking the first 2 bytes of the SHA-256 hash of the public key
 func generateKeyID(publicKey []byte) uint16 {
 	hash := sha256.Sum256(publicKey)
 	return binary.BigEndian.Uint16(hash[:2])

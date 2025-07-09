@@ -10,21 +10,21 @@ The `dnssec_pqc` plugin extends CoreDNS to allow DNSSEC zone signing and validat
 
 The plugin currently supports the following post-quantum signature schemes, identified by custom algorithm IDs:
 
-| Algorithm        | ID |
-|------------------|----|
-| FALCON512        | 17 |
-| DILITHIUM2       | 18 |
-| SPHINCS_SHA2     | 19 |
-| MAYO1            | 20 |
-| SNOVA            | 21 |
-| FALCON1024       | 27 |
-| DILITHIUM3       | 28 |
-| SPHINCS_SHAKE    | 29 |
-| MAYO3            | 30 |
-| SNOVASHAKE       | 31 |
-| FALCONPADDED512  | 37 |
-| DILITHIUM5       | 38 |
-| FALCONPADDED1024 | 47 |
+| Algorithm        | ID | liboqs Name |
+|------------------|----|-------------|
+| FALCON512        | 17 | Falcon-512 |
+| DILITHIUM2       | 18 | Dilithium2 |
+| SPHINCS_SHA2     | 19 | SPHINCS+-SHA2-128f-simple* |
+| MAYO1            | 20 | MAYO-1 |
+| SNOVA            | 21 | *(not available)* |
+| FALCON1024       | 27 | Falcon-1024 |
+| DILITHIUM3       | 28 | Dilithium3 |
+| SPHINCS_SHAKE    | 29 | SPHINCS+-SHAKE-128f-simple* |
+| MAYO3            | 30 | MAYO-3 |
+| SNOVASHAKE       | 31 | *(not available)* |
+| FALCONPADDED512  | 37 | Falcon-padded-512 |
+| DILITHIUM5       | 38 | Dilithium5 |
+| FALCONPADDED1024 | 47 | Falcon-padded-1024 |
 
 ## Dependencies
 
@@ -61,8 +61,18 @@ This modifies the CoreDNS source code on the fly to include the PQC plugin and t
 The plugin includes a key generator tool for creating PQC DNSSEC keys. It's also built with `./scripts/build.sh` and you can use with the following command:
 
 ```bash
-./keygen/keygen
+./keygen/keygen -algorithm <algorithm_name> -number <algorithm_number> [-domain <domain>]
 ```
+
+**Usage:** Requires `-algorithm <name>` (use liboqs Name from table above) and `-number <id>` (algorithm ID from table). Optionally specify `-domain <domain>` (defaults to `mydomain.org`). Use `-help` to see available algorithms.
+
+For example
+
+```bash
+./keygen/keygen -algorithm Dilithium2 -number 18
+```
+
+To see exact algorithm names available in your installation, run: `./keygen/keygen -help`
 
 ## Example Configuration
 
