@@ -50,7 +50,7 @@ done
 # Setup liboqs-go pkg-config if needed
 if ! pkg-config --exists liboqs-go 2>/dev/null; then
     echo "Setting up liboqs-go configuration..."
-    git clone --depth=1 --branch v$LIBOQS_VERSION https://github.com/open-quantum-safe/liboqs-go /tmp/liboqs-go
+    git clone --depth=1 --branch $LIBOQS_VERSION https://github.com/open-quantum-safe/liboqs-go /tmp/liboqs-go
     sudo cp /tmp/liboqs-go/.config/liboqs-go.pc /usr/local/lib/pkgconfig/
     rm -rf /tmp/liboqs-go
 fi
@@ -59,7 +59,7 @@ echo "Setting up CoreDNS in $COREDNS_DIR..."
 rm -rf "$COREDNS_DIR"
 git clone "$COREDNS_REPO" "$COREDNS_DIR"
 cd "$COREDNS_DIR"
-n
+
 if [ "$COREDNS_VERSION" != "master" ]; then
     echo "Checking out version $COREDNS_VERSION..."
     git checkout "$COREDNS_VERSION"
