@@ -47,6 +47,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Check if liboqs is installed first
+if ! pkg-config --exists liboqs 2>/dev/null; then
+    echo "Error: liboqs not found. Please run: ./scripts/install_liboqs.sh"
+    exit 1
+fi
+
 # Setup liboqs-go pkg-config if needed
 if ! pkg-config --exists liboqs-go 2>/dev/null; then
     echo "Setting up liboqs-go configuration..."
@@ -54,6 +60,15 @@ if ! pkg-config --exists liboqs-go 2>/dev/null; then
     sudo cp /tmp/liboqs-go/.config/liboqs-go.pc /usr/local/lib/pkgconfig/
     rm -rf /tmp/liboqs-go
 fi
+
+echo "Building PQC key generator..."
+cd keygen
+if [ ! -f "go.mod" ]; then
+    go mod init keygen
+fi
+go get github.com/open-quantum-safe/liboqs-go/oqs
+go build -o keygen main.go
+cd ..
 
 echo "Setting up CoreDNS in $COREDNS_DIR..."
 rm -rf "$COREDNS_DIR"
@@ -93,4 +108,6 @@ go mod tidy
 echo "Building CoreDNS with PQC support..."
 go build -o coredns-pqc .
 
-echo "Done! Binary: ./$COREDNS_DIR/coredns-pqc"
+echo "Done! Binaries:"
+echo "  Key generator: keygen/keygen"
+echo "  CoreDNS: ./$COREDNS_DIR/coredns-pqc"

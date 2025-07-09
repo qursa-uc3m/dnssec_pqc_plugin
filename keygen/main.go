@@ -1,3 +1,5 @@
+package main
+
 import (
 	"crypto/sha256"
 	"encoding/base64"
@@ -10,19 +12,17 @@ import (
 )
 
 func main() {
-
 	sigs := oqs.SupportedSigs()
 	fmt.Println("Algoritmos de firma soportados por liboqs:")
 	for _, sig := range sigs {
 		fmt.Println(" -", sig)
 	}
 
-
 	enabled := oqs.EnabledSigs()
 	fmt.Println("Algoritmos de firma habilitados en esta instalación:")
 	for _, alg := range enabled {
 		fmt.Println(" -", alg)
-	}   
+	}
 
 	// Dominio para el que se generan las claves
 	domain := "mydomain.org"

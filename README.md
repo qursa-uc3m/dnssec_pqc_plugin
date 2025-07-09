@@ -51,10 +51,18 @@ This installs the `liboqs` version `0.12.0` by default.
 and then install CoreDNS with PQC plugin:
 
 ```bash
-./scripts/install_coredns.sh
+./scripts/build.sh
 ```
 
 This modifies the CoreDNS source code on the fly to include the PQC plugin and the necessary dependencies. For reference, you can examine the manual approach used in [Juligent/coredns](https://github.com/Juligent/coredns).
+
+## Key Generation
+
+The plugin includes a key generator tool for creating PQC DNSSEC keys. It's also built with `./scripts/build.sh` and you can use with the following command:
+
+```bash
+./keygen/keygen
+```
 
 ## Example Configuration
 
