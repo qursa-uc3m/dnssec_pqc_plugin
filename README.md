@@ -14,12 +14,12 @@ The plugin currently supports the following post-quantum signature schemes, iden
 |------------------|----|-------------|
 | FALCON512        | 17 | Falcon-512 |
 | DILITHIUM2       | 18 | Dilithium2 |
-| SPHINCS_SHA2     | 19 | SPHINCS+-SHA2-128f-simple* |
+| SPHINCS_SHA2     | 19 | SPHINCS+-SHA2-128f-simple |
 | MAYO1            | 20 | MAYO-1 |
 | SNOVA            | 21 | *(not available)* |
 | FALCON1024       | 27 | Falcon-1024 |
 | DILITHIUM3       | 28 | Dilithium3 |
-| SPHINCS_SHAKE    | 29 | SPHINCS+-SHAKE-128f-simple* |
+| SPHINCS_SHAKE    | 29 | SPHINCS+-SHAKE-128f-simple |
 | MAYO3            | 30 | MAYO-3 |
 | SNOVASHAKE       | 31 | *(not available)* |
 | FALCONPADDED512  | 37 | Falcon-padded-512 |
@@ -80,7 +80,7 @@ To configure CoreDNS to use the PQC plugin, you can create a `Corefile` with the
 
 ```bash
 example.org:1053 {
-    dnssec {
+    dnssec_pqc {
         key file <your_path>/dnssec_test/Kexample.org.+XXX+XXXXX
     }
     forward . 8.8.8.8
@@ -90,4 +90,36 @@ example.org:1053 {
     forward . 8.8.8.8
     log
 }
+```
+
+## Testing
+
+This repository includes a testing script to evaluate PQC algorithms.
+
+### Testing script dependencies
+
+You may need to install the following dependencies first:
+
+```bash
+sudo apt-get install tshark linux-tools-common linux-tools-generic dnsutils
+```
+
+### Testing script usage
+
+```bash
+./scripts/dns_test.sh <algorithm|all> [iterations]
+```
+
+The default number of iterations is 1. Results are saved in `resultados_*` directories with performance metrics and logs.
+
+For example, you can test a single algorithm with:
+
+```bash
+sudo ./scripts/dns_test.sh Dilithium2
+```
+
+Or test all the available algorithms for a given number of iterations:
+
+```bash
+sudo ./scripts/dns_test.sh all 10
 ```
