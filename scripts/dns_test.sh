@@ -116,17 +116,30 @@ parse_cpu_cycles() {
     echo "[*] CPU Cycles: $CPU_CYCLES"
 }
 
-parse_dns_response_size() {
-    local NETWORK_FILE=$1
+parse_dns_response_size_from_dig() {
+    local DIG_LOG=$1
     local ALG=$2
     local ITERATION=$3
     local CSV_FILE=$4
     
     local DNS_SIZE=0
     
-    if [ -f "$NETWORK_FILE" ] && [ -s "$NETWORK_FILE" ]; then
-        DNS_SIZE=$(grep "DNS Response Size:" "$NETWORK_FILE" | grep -o '[0-9]\+' | head -1 || echo "0")
+    if [ -f "$DIG_LOG" ] && [ -s "$DIG_LOG" ]; then
+        # Extract MSG SIZE from the specific iteration section
+        # Look for the pattern ";; MSG SIZE  rcvd: XXXX" in the iteration section
+        DNS_SIZE=$(awk "/=== Iteration $ITERATION ===/,/=== Iteration $((ITERATION+1)) ===/" "$DIG_LOG" | \
+                  grep -E "MSG SIZE.*rcvd:" | \
+                  grep -o "rcvd: [0-9]\+" | \
+                  awk '{print $2}' | \
+                  head -1)
+        
         [ -z "$DNS_SIZE" ] && DNS_SIZE=0
+        
+        # Validate that we got a number
+        if ! [[ "$DNS_SIZE" =~ ^[0-9]+$ ]]; then
+            echo "[!] Warning: Could not parse DNS message size from dig output, setting to 0"
+            DNS_SIZE=0
+        fi
     fi
     
     # Create CSV header if file doesn't exist
@@ -267,19 +280,13 @@ EOF
             return 1
         fi
         
-        echo "[*] Starting event-driven measurement (iteration $i)"
+        echo "[*] Starting measurement (iteration $i)"
         echo "=== Iteration $i ===" >> "$DIG_LOG"
         
         # Capture initial memory stats
         if [ -f "/proc/$SERVER_PID/status" ]; then
             cp "/proc/$SERVER_PID/status" "$RESULT_DIR/memory_pre_${i}.txt"
         fi
-        
-        # Start packet capture for DNS response size measurement
-        CAPTURE_TMP="$RESULT_DIR/capture_${i}.tmp"
-        sudo tcpdump -i lo -n -v -s 0 port $PORT and udp -w "$RESULT_DIR/capture_${i}.pcap" &
-        CAPTURE_PID=$!
-        sleep 0.5
         
         # Start perf measurement on server process
         perf stat -p "$SERVER_PID" \
@@ -294,7 +301,7 @@ EOF
         START_TIME=$(date +%s.%N)
         
         # Execute DNS query
-        dig @$DNS_SERVER -p $PORT $ZONENAME DNSKEY +dnssec +bufsize=4096 +edns=0 >> "$DIG_LOG" 2>/dev/null
+        dig @$DNS_SERVER -p $PORT $ZONENAME DNSKEY +dnssec +bufsize=4096 +edns=0 >> "$DIG_LOG" 2>&1
         
         # Get timestamp after dig command
         END_TIME=$(date +%s.%N)
@@ -320,49 +327,26 @@ EOF
             echo "[*] ✓ Perf measurement completed"
         fi
         
-        # Stop packet capture
-        sleep 0.5
-        sudo kill "$CAPTURE_PID" 2>/dev/null || true
-        wait "$CAPTURE_PID" 2>/dev/null || true
-        
-        # FIX: Convert pcap to text for parsing
-        if [ -f "$RESULT_DIR/capture_${i}.pcap" ]; then
-            sudo tcpdump -r "$RESULT_DIR/capture_${i}.pcap" -n -v > "$CAPTURE_TMP" 2>/dev/null
-            rm -f "$RESULT_DIR/capture_${i}.pcap"
-        fi
-        
-        # Extract DNS response size from tcpdump output
-        RESPONSE_SIZE="Unknown"
-        if [ -f "$CAPTURE_TMP" ] && [ -s "$CAPTURE_TMP" ]; then
-            # Look for the largest UDP length (DNSSEC response)
-            RESPONSE_SIZE=$(grep -E "UDP, length" "$CAPTURE_TMP" | \
-                           grep -o "length [0-9]\+" | \
-                           awk '{print $2}' | \
-                           sort -n | tail -1)
-            [ -z "$RESPONSE_SIZE" ] && RESPONSE_SIZE="Unknown"
-        fi
-        
-        # Create network log
-        echo "=== Network Analysis (Iteration $i) ===" > "$RESULT_DIR/network_${i}.log"
-        echo "DNS Response Size: ${RESPONSE_SIZE} bytes" >> "$RESULT_DIR/network_${i}.log"
-        if [ -f "$CAPTURE_TMP" ]; then
-            echo "--- packet capture output ---" >> "$RESULT_DIR/network_${i}.log"
-            cat "$CAPTURE_TMP" >> "$RESULT_DIR/network_${i}.log"
-            rm -f "$CAPTURE_TMP"
-        fi
-        
         # Parse and save data to CSV files using bash functions
         echo "[*] Parsing and saving data to CSV files..."
         
         parse_cpu_cycles "$RESULT_DIR/perf_${i}.log" "$ALG" "$i" "$CPU_CSV"
-        parse_dns_response_size "$RESULT_DIR/network_${i}.log" "$ALG" "$i" "$DNS_SIZE_CSV"
+        parse_dns_response_size_from_dig "$DIG_LOG" "$ALG" "$i" "$DNS_SIZE_CSV"
         parse_memory_usage "$RESULT_DIR/memory_post_${i}.txt" "$ALG" "$i" "$MEMORY_CSV"
         
         # Stop CoreDNS
         kill "$SERVER_PID" 2>/dev/null
         wait "$SERVER_PID" 2>/dev/null || true
         
-        echo "[✓] Iteration $i completed (Response: ${RESPONSE_SIZE} bytes, Timing: ${PRECISE_TIME_MICROSECONDS}μs)"
+        # Extract the DNS response size for this iteration to show in summary
+        DNS_RESPONSE_SIZE=$(awk "/=== Iteration $i ===/,/=== Iteration $((i+1)) ===/" "$DIG_LOG" | \
+                           grep -E "MSG SIZE.*rcvd:" | \
+                           grep -o "rcvd: [0-9]\+" | \
+                           awk '{print $2}' | \
+                           head -1)
+        [ -z "$DNS_RESPONSE_SIZE" ] && DNS_RESPONSE_SIZE="Unknown"
+        
+        echo "[✓] Iteration $i completed (DNS Response: ${DNS_RESPONSE_SIZE} bytes, Timing: ${PRECISE_TIME_MICROSECONDS}μs)"
         echo ""
     done
     
@@ -435,7 +419,8 @@ if [ "$ALGO" = "all" ]; then
             echo "  $csv_type: $RECORD_COUNT records -> $(basename "$MASTER_CSV")"
         fi
     done
-    
+
+    sudo chown -R $SUDO_USER:$SUDO_USER "$MAIN_RESULT_DIR" 2>/dev/null || chown -R $USER:$USER "$MAIN_RESULT_DIR" 2>/dev/null
     echo "All testing completed: $MAIN_RESULT_DIR"
 else
     # Determine algorithm type and ID
