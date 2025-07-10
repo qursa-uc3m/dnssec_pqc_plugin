@@ -101,7 +101,7 @@ This repository includes a testing script to evaluate PQC algorithms.
 You may need to install the following dependencies first:
 
 ```bash
-sudo apt-get install tshark linux-tools-common linux-tools-generic dnsutils
+sudo apt-get install linux-tools-common linux-tools-generic dnsutils bind9-utils
 ```
 
 ### Testing script usage

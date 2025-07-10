@@ -14,23 +14,35 @@ COREDNS_PATH="$BASE_DIR/coredns/coredns-pqc"
 
 if [ -z "$ALGO" ]; then
     echo "Usage: $0 <ALGORITHM|all> [ITERATIONS]"
-    echo "Algorithms: Falcon-512, Dilithium2, SPHINCS+-SHA2-128f-simple, MAYO-1,"
-    echo "            Falcon-1024, Dilithium3, SPHINCS+-SHAKE-128f-simple, MAYO-3,"
-    echo "            Falcon-padded-512, Dilithium5, Falcon-padded-1024"
+    echo "PQC Algorithms: Falcon-512, Dilithium2, SPHINCS+-SHA2-128f-simple, MAYO-1,"
+    echo "                Falcon-1024, Dilithium3, SPHINCS+-SHAKE-128f-simple, MAYO-3,"
+    echo "                Falcon-padded-512, Dilithium5, Falcon-padded-1024"
+    echo "Traditional:    RSA-2048, RSA-4096, ECDSA-P256, ECDSA-P384, Ed25519"
     exit 1
 fi
 
 # Check for required tools
-if ! command -v bc >/dev/null 2>&1; then
-    echo "[-] Error: bc not found. Please install: sudo apt-get install bc"
-    exit 1
-fi
+for tool in bc dnssec-keygen; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "[-] Error: $tool not found. Please install it."
+        exit 1
+    fi
+done
 
 declare -A LIBOQS_TO_ID=(
     ["Falcon-512"]="17"    ["Dilithium2"]="18"    ["SPHINCS+-SHA2-128f-simple"]="19"
     ["MAYO-1"]="20"        ["Falcon-1024"]="27"   ["Dilithium3"]="28"
     ["SPHINCS+-SHAKE-128f-simple"]="29" ["MAYO-3"]="30" ["Falcon-padded-512"]="37"
     ["Dilithium5"]="38"    ["Falcon-padded-1024"]="47"
+)
+
+# Traditional algorithms (use dnssec-keygen)
+declare -A TRADITIONAL_ALGOS=(
+    ["RSA-2048"]="RSASHA256"
+    ["RSA-4096"]="RSASHA256" 
+    ["ECDSA-P256"]="ECDSAP256SHA256"
+    ["ECDSA-P384"]="ECDSAP384SHA384"
+    ["Ed25519"]="ED25519"
 )
 
 # Bash parsing functions
@@ -131,28 +143,79 @@ run_test() {
     mkdir -p "$KEYS_DIR"
     cd "$KEYS_DIR"
     
-    for cmd in "$KEYGEN_PATH" "$COREDNS_PATH"; do
-        if [ ! -x "$cmd" ]; then
-            echo "[-] Not found: $cmd"
+    # Check if this is a traditional algorithm or PQC
+    if [[ -n "${TRADITIONAL_ALGOS[$ALG]}" ]]; then
+        # Traditional algorithm - use dnssec-keygen
+        local DNSSEC_ALG="${TRADITIONAL_ALGOS[$ALG]}"
+        
+        echo "[*] Generating traditional DNSSEC keys for $ALG"
+        
+        # Set key size for RSA algorithms
+        if [[ "$ALG" == "RSA-2048" ]]; then
+            dnssec-keygen -a "$DNSSEC_ALG" -b 2048 "$ZONENAME"
+        elif [[ "$ALG" == "RSA-4096" ]]; then
+            dnssec-keygen -a "$DNSSEC_ALG" -b 4096 "$ZONENAME"
+        else
+            # ECDSA and Ed25519 don't need -b parameter
+            dnssec-keygen -a "$DNSSEC_ALG" "$ZONENAME"
+        fi
+        
+        if [ $? -ne 0 ]; then
+            echo "[-] Traditional key generation failed for $ALG"
             return 1
         fi
-    done
-    
-    # Generate keys
-    if ! "$KEYGEN_PATH" -algorithm "$ALG" -number "$ALG_ID" -domain "$ZONENAME" >/dev/null; then
-        echo "[-] Key generation failed for $ALG"
-        return 1
-    fi
-    
-    KEY_FILE=$(ls K${ZONENAME}+${ALG_ID}+*.key 2>/dev/null | head -1)
-    if [ -z "$KEY_FILE" ]; then
-        echo "[-] Key file not found"
-        return 1
-    fi
-    KEY_BASE=$(basename "$KEY_FILE" .key)
-    
-    # Create Corefile
-    cat > "$RESULT_DIR/Corefile" << EOF
+        
+        echo "[*] Files created after key generation:"
+        ls -la K* 2>/dev/null || echo "No K* files found"
+        
+        # Find the generated key file (traditional DNSSEC pattern: domain.+alg+keyid.key)
+        KEY_FILE=$(ls K*.+*+*.key 2>/dev/null | head -1)
+        if [ -z "$KEY_FILE" ]; then
+            echo "[-] Traditional key file not found. Available files:"
+            ls -la K* 2>/dev/null || echo "No K* files found"
+            return 1
+        fi
+        KEY_BASE=$(basename "$KEY_FILE" .key)
+        
+        # Create Corefile for traditional DNSSEC
+        cat > "$RESULT_DIR/Corefile" << EOF
+${ZONENAME}:${PORT} {
+    dnssec {
+        key file ${KEYS_DIR}/${KEY_BASE}.key
+    }
+    forward . 8.8.8.8
+    log
+}
+.:${PORT} {
+    forward . 8.8.8.8
+    log
+}
+EOF
+        
+    else
+        # PQC algorithm - use liboqs-go keygen
+        for cmd in "$KEYGEN_PATH" "$COREDNS_PATH"; do
+            if [ ! -x "$cmd" ]; then
+                echo "[-] Not found: $cmd"
+                return 1
+            fi
+        done
+        
+        # Generate PQC keys
+        if ! "$KEYGEN_PATH" -algorithm "$ALG" -number "$ALG_ID" -domain "$ZONENAME" >/dev/null; then
+            echo "[-] PQC key generation failed for $ALG"
+            return 1
+        fi
+        
+        KEY_FILE=$(ls K${ZONENAME}+${ALG_ID}+*.key 2>/dev/null | head -1)
+        if [ -z "$KEY_FILE" ]; then
+            echo "[-] PQC key file not found"
+            return 1
+        fi
+        KEY_BASE=$(basename "$KEY_FILE" .key)
+        
+        # Create Corefile for PQC
+        cat > "$RESULT_DIR/Corefile" << EOF
 ${ZONENAME}:${PORT} {
     dnssec_pqc {
         key file ${KEYS_DIR}/${KEY_BASE}.key
@@ -165,6 +228,7 @@ ${ZONENAME}:${PORT} {
     log
 }
 EOF
+    fi
     
     cd "$BASE_DIR"
     
@@ -317,14 +381,25 @@ if [ "$ALGO" = "all" ]; then
     echo "Results: $MAIN_RESULT_DIR"
     echo ""
     
+    # Test PQC algorithms
     for ALG in "${!LIBOQS_TO_ID[@]}"; do
         ALG_ID=${LIBOQS_TO_ID[$ALG]}
         ALG_SAFE=$(echo "$ALG" | sed 's/[^a-zA-Z0-9]/_/g')
         ALG_RESULT_DIR="$MAIN_RESULT_DIR/$ALG_SAFE"
         mkdir -p "$ALG_RESULT_DIR"
         
-        echo "Testing: $ALG"
+        echo "Testing PQC: $ALG"
         run_test "$ALG" "$ALG_ID" "$ALG_RESULT_DIR" || continue
+    done
+    
+    # Test traditional algorithms
+    for ALG in "${!TRADITIONAL_ALGOS[@]}"; do
+        ALG_SAFE=$(echo "$ALG" | sed 's/[^a-zA-Z0-9]/_/g')
+        ALG_RESULT_DIR="$MAIN_RESULT_DIR/$ALG_SAFE"
+        mkdir -p "$ALG_RESULT_DIR"
+        
+        echo "Testing Traditional: $ALG"
+        run_test "$ALG" "" "$ALG_RESULT_DIR" || continue
     done
     
     echo ""
@@ -354,10 +429,17 @@ if [ "$ALGO" = "all" ]; then
     
     echo "All testing completed: $MAIN_RESULT_DIR"
 else
-    ALG_ID=${LIBOQS_TO_ID[$ALGO]}
-    if [ -z "$ALG_ID" ]; then
+    # Determine algorithm type and ID
+    if [[ -n "${LIBOQS_TO_ID[$ALGO]}" ]]; then
+        ALG_ID=${LIBOQS_TO_ID[$ALGO]}
+        ALG_TYPE="PQC"
+    elif [[ -n "${TRADITIONAL_ALGOS[$ALGO]}" ]]; then
+        ALG_ID=""
+        ALG_TYPE="Traditional"
+    else
         echo "[-] Algorithm '$ALGO' not supported"
-        echo "Available: ${!LIBOQS_TO_ID[@]}"
+        echo "Available PQC: ${!LIBOQS_TO_ID[@]}"
+        echo "Available Traditional: ${!TRADITIONAL_ALGOS[@]}"
         exit 1
     fi
     
@@ -365,7 +447,7 @@ else
     RESULT_DIR="$BASE_DIR/results_${ALG_SAFE}_$(date +%s)"
     mkdir -p "$RESULT_DIR"
     
-    echo "Testing: $ALGO ($ITERATIONS iterations)"
+    echo "Testing $ALG_TYPE: $ALGO ($ITERATIONS iterations)"
     echo "Results: $RESULT_DIR"
     echo ""
     
