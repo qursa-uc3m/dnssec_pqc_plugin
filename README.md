@@ -13,17 +13,17 @@ The plugin currently supports the following post-quantum signature schemes, iden
 | Algorithm        | ID | liboqs Name |
 |------------------|----|-------------|
 | FALCON512        | 17 | Falcon-512 |
-| DILITHIUM2       | 18 | Dilithium2 |
+| ML-DSA-44        | 18 | ML-DSA-44 |
 | SPHINCS_SHA2     | 19 | SPHINCS+-SHA2-128f-simple |
 | MAYO1            | 20 | MAYO-1 |
-| SNOVA            | 21 | *(not available)* |
+| SNOVA            | 21 | SNOVA_24_5_4 |
 | FALCON1024       | 27 | Falcon-1024 |
-| DILITHIUM3       | 28 | Dilithium3 |
+| ML-DSA-65        | 28 | ML-DSA-65 |
 | SPHINCS_SHAKE    | 29 | SPHINCS+-SHAKE-128f-simple |
 | MAYO3            | 30 | MAYO-3 |
-| SNOVASHAKE       | 31 | *(not available)* |
+| SNOVASHAKE       | 31 | SNOVA_24_5_4_SHAKE |
 | FALCONPADDED512  | 37 | Falcon-padded-512 |
-| DILITHIUM5       | 38 | Dilithium5 |
+| ML-DSA-87        | 38 | ML-DSA-87 |
 | FALCONPADDED1024 | 47 | Falcon-padded-1024 |
 
 ## Dependencies
@@ -46,7 +46,7 @@ First ensure you have `liboqs` installed:
 ./scripts/install_liboqs.sh
 ```
 
-This installs the `liboqs` version `0.12.0` by default.
+This installs the `liboqs` version `0.14.0-rc1` by default.
 
 and then install CoreDNS with PQC plugin:
 
@@ -69,7 +69,7 @@ The plugin includes a key generator tool for creating PQC DNSSEC keys. It's also
 For example
 
 ```bash
-./keygen/keygen -algorithm Dilithium2 -number 18
+./keygen/keygen -algorithm ML-DSA-44 -number 18
 ```
 
 To see exact algorithm names available in your installation, run: `./keygen/keygen -help`
@@ -115,7 +115,7 @@ The default number of iterations is 1. Results are saved in `resultados_*` direc
 For example, you can test a single algorithm with:
 
 ```bash
-sudo ./scripts/dns_test.sh Dilithium2
+sudo ./scripts/dns_test.sh ML-DSA-44
 ```
 
 Or test all the available algorithms for a given number of iterations:

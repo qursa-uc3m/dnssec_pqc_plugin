@@ -14,9 +14,9 @@ COREDNS_PATH="$BASE_DIR/coredns/coredns-pqc"
 
 if [ -z "$ALGO" ]; then
     echo "Usage: $0 <ALGORITHM|all> [ITERATIONS]"
-    echo "PQC Algorithms: Falcon-512, Dilithium2, SPHINCS+-SHA2-128f-simple, MAYO-1,"
-    echo "                Falcon-1024, Dilithium3, SPHINCS+-SHAKE-128f-simple, MAYO-3,"
-    echo "                Falcon-padded-512, Dilithium5, Falcon-padded-1024"
+    echo "PQC Algorithms: Falcon-512, ML-DSA-44, SPHINCS+-SHA2-128f-simple, MAYO-1,"
+    echo "                Falcon-1024, ML-DSA-65, SPHINCS+-SHAKE-128f-simple, MAYO-3,"
+    echo "                Falcon-padded-512, ML-DSA-87, Falcon-padded-1024, SNOVA_24_5_4, SNOVA_24_5_4_SHAKE"
     echo "Traditional:    RSA-2048, RSA-4096, ECDSA-P256, ECDSA-P384, Ed25519"
     exit 1
 fi
@@ -30,10 +30,19 @@ for tool in bc dnssec-keygen; do
 done
 
 declare -A LIBOQS_TO_ID=(
-    ["Falcon-512"]="17"    ["Dilithium2"]="18"    ["SPHINCS+-SHA2-128f-simple"]="19"
-    ["MAYO-1"]="20"        ["Falcon-1024"]="27"   ["Dilithium3"]="28"
-    ["SPHINCS+-SHAKE-128f-simple"]="29" ["MAYO-3"]="30" ["Falcon-padded-512"]="37"
-    ["Dilithium5"]="38"    ["Falcon-padded-1024"]="47"
+    ["Falcon-512"]="17"    
+    ["ML-DSA-44"]="18"    
+    ["SPHINCS+-SHA2-128f-simple"]="19"
+    ["MAYO-1"]="20"        
+    ["SNOVA_24_5_4"]="21"
+    ["Falcon-1024"]="27"   
+    ["ML-DSA-65"]="28"
+    ["SPHINCS+-SHAKE-128f-simple"]="29" 
+    ["MAYO-3"]="30"
+    ["SNOVA_24_5_4_SHAKE"]="31"
+    ["Falcon-padded-512"]="37"
+    ["ML-DSA-87"]="38"    
+    ["Falcon-padded-1024"]="47"
 )
 
 # Traditional algorithms (use dnssec-keygen)

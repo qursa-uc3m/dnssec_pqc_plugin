@@ -10,7 +10,7 @@ COREDNS_VERSION="master"
 PQC_PLUGIN_REPO="github.com/qursa-uc3m/dnssec_pqc_plugin"
 PQC_PLUGIN_VERSION="v0.1.1"
 LIBOQS_REPO="github.com/open-quantum-safe/liboqs-go"
-LIBOQS_VERSION="0.12.0"
+LIBOQS_VERSION="0.14.0-rc1"
 PQC_DNS_REPO="github.com/qursa-uc3m/dns"
 PQC_DNS_VERSION="master"
 
