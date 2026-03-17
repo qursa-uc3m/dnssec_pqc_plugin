@@ -24,6 +24,7 @@ func setup(c *caddy.Controller) error {
 	}
 
 	ca := cache.New(capacity)
+	log.Infof("Signature cache capacity: %d (disabled: %t)", capacity, capacity <= 0)
 	stop := make(chan struct{})
 
 	c.OnShutdown(func() error {
@@ -36,7 +37,7 @@ func setup(c *caddy.Controller) error {
 	})
 
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
-		return New(zones, keys, splitkeys, next, ca)
+		return New(zones, keys, splitkeys, next, ca, capacity)
 	})
 
 	return nil
