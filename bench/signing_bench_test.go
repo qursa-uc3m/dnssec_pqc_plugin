@@ -6,8 +6,11 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
+	"math/big"
 	"testing"
 	"time"
 
@@ -23,13 +26,16 @@ type algConfig struct {
 }
 
 var algorithms = []algConfig{
+	{dns.RSASHA256, "", "RSA-SHA256"},
 	{dns.ECDSAP256SHA256, "", "ECDSA-P256"},
 	{dns.ED25519, "", "Ed25519"},
 	{dns.FALCON512, "Falcon-512", "Falcon-512"},
 	{dns.FALCON1024, "Falcon-1024", "Falcon-1024"},
 	{dns.ML_DSA_44, "ML-DSA-44", "ML-DSA-44"},
 	{dns.ML_DSA_65, "ML-DSA-65", "ML-DSA-65"},
+	{dns.ML_DSA_87, "ML-DSA-87", "ML-DSA-87"},
 	{dns.MAYO1, "MAYO-1", "MAYO-1"},
+	{dns.MAYO3, "MAYO-3", "MAYO-3"},
 	{dns.SNOVA, "SNOVA_24_5_4", "SNOVA"},
 	{dns.SPHINCS_SHA2, "SPHINCS+-SHA2-128s-simple", "SLH-DSA-SHA2-128s"},
 }
@@ -79,6 +85,29 @@ func generatePQCKey(alg algConfig, dk *dns.DNSKEY) (*benchKey, error) {
 
 func generateTraditionalKey(alg algConfig, dk *dns.DNSKEY) (*benchKey, error) {
 	switch alg.dnsAlg {
+	case dns.RSASHA256:
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return nil, err
+		}
+		// RFC 3110 format: 1-byte exponent length + exponent + modulus
+		e := big.NewInt(int64(key.PublicKey.E))
+		eBytes := e.Bytes()
+		nBytes := key.PublicKey.N.Bytes()
+		pub := make([]byte, 0, 1+len(eBytes)+len(nBytes))
+		if len(eBytes) <= 255 {
+			pub = append(pub, byte(len(eBytes)))
+		} else {
+			pub = append(pub, 0)
+			buf := make([]byte, 2)
+			binary.BigEndian.PutUint16(buf, uint16(len(eBytes)))
+			pub = append(pub, buf...)
+		}
+		pub = append(pub, eBytes...)
+		pub = append(pub, nBytes...)
+		dk.PublicKey = base64.StdEncoding.EncodeToString(pub)
+		return &benchKey{dnskey: dk, signer: key, tag: dk.KeyTag()}, nil
+
 	case dns.ECDSAP256SHA256:
 		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {

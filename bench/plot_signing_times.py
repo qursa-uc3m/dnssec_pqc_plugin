@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Parse Go benchmark output and plot mean signing times with std-dev error bars.
+"""Parse Go benchmark output and plot signing times (histogram with error bars).
 
 Usage:
     python3 plot_signing_times.py [BENCH_RESULTS_FILE] [OUTPUT_FILE]
@@ -42,20 +42,23 @@ def parse_bench_file(path: str) -> dict[str, list[float]]:
 
 # ── Plot ───────────────────────────────────────────────────────────────
 
-# Display order (classical first, then PQC fast-to-slow)
+# Display order (classical first, then PQC sorted by expected mean)
 DISPLAY_ORDER = [
+    "RSA-SHA256",
     "Ed25519",
     "ECDSA-P256",
     "ML-DSA-44",
     "ML-DSA-65",
+    "ML-DSA-87",
     "MAYO-1",
+    "MAYO-3",
     "Falcon-512",
     "SNOVA",
     "Falcon-1024",
     "SLH-DSA-SHA2-128s",
 ]
 
-# Colour palette (green to blue gradient)
+# Colour palette: green-to-blue gradient
 _CMAP = mcolors.LinearSegmentedColormap.from_list("", ["#9fcf69", "#33acdc"])
 _PALETTE = [_CMAP(v) for v in np.linspace(0, 1, len(DISPLAY_ORDER))]
 COLORS = dict(zip(DISPLAY_ORDER, _PALETTE))
@@ -63,44 +66,59 @@ COLORS = dict(zip(DISPLAY_ORDER, _PALETTE))
 
 def plot(data: dict[str, list[float]], outfile: str):
     names = [n for n in DISPLAY_ORDER if n in data]
-    means_us = [np.mean(data[n]) / 1e3 for n in names]   # ns -> us
-    stds_us  = [np.std(data[n], ddof=1) / 1e3 for n in names]
-    colors   = [COLORS.get(n, "#888888") for n in names]
+    n_algs = len(names)
+    n_samples = min(len(data[n]) for n in names)
+
+    # Convert ns -> us
+    means = [np.mean(data[n]) / 1e3 for n in names]
+    stds = [np.std(data[n], ddof=1) / 1e3 for n in names]
 
     plt.rcParams.update({
-        "font.family": "sans-serif",
+        "font.family": "Ubuntu",
         "font.size": 11,
         "axes.labelsize": 12,
         "axes.labelweight": "bold",
+        "axes.titlesize": 16,
+        "axes.titleweight": "bold",
+        "axes.titlepad": 20,
     })
 
-    fig, ax = plt.subplots(figsize=(8, 4.5))
-    x = np.arange(len(names))
-    bars = ax.bar(x, means_us, yerr=stds_us, capsize=4,
-                  color=colors, edgecolor="black", linewidth=0.5,
-                  error_kw=dict(lw=1.2, capthick=1.2))
+    fig, ax = plt.subplots(figsize=(11, 6))
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(names, rotation=30, ha="right", fontsize=10)
-    ax.set_ylabel("Signing time (us)")
+    x = np.arange(n_algs)
+    colors = [COLORS.get(n, "#888888") for n in names]
+
+    # Grid behind data
+    ax.grid(True, linestyle="--", which="both", color="grey", alpha=0.4)
+    ax.set_axisbelow(True)
+
+    # ── Histogram bars with error bars ──────────────────────────────
+    bars = ax.bar(
+        x, means, width=0.6,
+        color=colors, edgecolor="black", linewidth=1.0,
+        alpha=1.0, zorder=2,
+    )
+    ax.errorbar(
+        x, means, yerr=stds,
+        fmt="none", ecolor="black", elinewidth=1.2, capsize=4, capthick=1.2,
+        zorder=3,
+    )
+
     ax.set_yscale("log")
-    ax.set_title("DNSSEC Signing Microbenchmark (n={})".format(
-        min(len(v) for v in data.values())))
-    ax.grid(axis="y", alpha=0.3, which="both")
-
-    # Annotate bars with mean value
-    for bar, m, s in zip(bars, means_us, stds_us):
-        if m > 1000:
-            label = f"{m/1e3:.1f} ms"
-        else:
-            label = f"{m:.1f} us"
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() * 1.15,
-                label, ha="center", va="bottom", fontsize=8)
+    ax.set_ylabel("Signing time (\u00b5s)")
+    ax.set_title(f"DNSSEC signing microbenchmark (n={n_samples})")
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=45, ha="right", fontsize=11)
 
     fig.tight_layout()
-    fig.savefig(outfile, dpi=300, bbox_inches="tight")
+
+    # Save both PDF and PNG
+    out = Path(outfile)
+    fig.savefig(out, dpi=300, bbox_inches="tight")
+    sibling = out.with_suffix(".png" if out.suffix == ".pdf" else ".pdf")
+    fig.savefig(sibling, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"Saved plot to {outfile}")
+    print(f"Saved plot to {out} + {sibling}")
 
 
 # ── LaTeX table ────────────────────────────────────────────────────────
