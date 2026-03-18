@@ -2,15 +2,17 @@
 """Parse Go benchmark output and plot signing times (histogram with error bars).
 
 Usage:
-    python3 plot_signing_times.py [BENCH_RESULTS_FILE] [OUTPUT_FILE]
+    python3 plot_signing_times.py [BENCH_FILE] [PLOT_FILE] [JSON_FILE]
 
 Defaults:
-    BENCH_RESULTS_FILE = bench_results_100.txt
-    OUTPUT_FILE        = signing_times.pdf
+    BENCH_FILE = bench_results_100.txt
+    PLOT_FILE  = signing_times.pdf
+    JSON_FILE  = signing_bench.json  (same dir as PLOT_FILE)
 
 The script also prints a LaTeX-ready table to stdout.
 """
 
+import json
 import re
 import sys
 from collections import defaultdict
@@ -143,6 +145,47 @@ def print_latex_table(data: dict[str, list[float]]):
     print("\\end{tabular}")
 
 
+# ── Mapping from bench display names to pipeline internal names ────────
+
+_BENCH_TO_INTERNAL = {
+    "RSA-SHA256":        "RSASHA256",
+    "ECDSA-P256":        "ECDSAP256SHA256",
+    "Ed25519":           "ED25519",
+    "Falcon-512":        "Falcon-512",
+    "Falcon-1024":       "Falcon-1024",
+    "ML-DSA-44":         "ML-DSA-44",
+    "ML-DSA-65":         "ML-DSA-65",
+    "ML-DSA-87":         "ML-DSA-87",
+    "MAYO-1":            "MAYO-1",
+    "MAYO-3":            "MAYO-3",
+    "SNOVA":             "SNOVA_24_5_4",
+    "SLH-DSA-SHA2-128s": "SPHINCS+-SHA2-128s-simple",
+}
+
+
+# ── JSON dump for the analysis pipeline ────────────────────────────────
+
+def dump_signing_json(data: dict[str, list[float]], path: str):
+    """Write {internal_name: {mean_ms, std_ms, cv, n}} for analyzer.py."""
+    out = {}
+    for bench_name, vals in data.items():
+        internal = _BENCH_TO_INTERNAL.get(bench_name, bench_name)
+        arr = np.array(vals) / 1e6  # ns -> ms
+        mean = float(np.mean(arr))
+        std = float(np.std(arr, ddof=1))
+        cv = std / mean if mean > 0 else 0.0
+        out[internal] = {
+            "mean_ms": round(mean, 4),
+            "std_ms": round(std, 4),
+            "cv": round(cv, 4),
+            "n": len(vals),
+        }
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(out, f, indent=2)
+    print(f"Saved signing bench JSON to {path}")
+
+
 # ── CSV dump for reproducibility ───────────────────────────────────────
 
 def dump_csv(data: dict[str, list[float]], path: str):
@@ -179,6 +222,11 @@ def main():
 
     plot(data, out_file)
     dump_csv(data, Path(out_file).with_suffix(".csv"))
+
+    json_file = sys.argv[3] if len(sys.argv) > 3 else str(
+        Path(out_file).with_name("signing_bench.json"))
+    dump_signing_json(data, json_file)
+
     print_latex_table(data)
 
 
