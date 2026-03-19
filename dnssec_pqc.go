@@ -3,6 +3,8 @@
 package dnssec_pqc
 
 import (
+	"math/rand"
+	"sync/atomic"
 	"time"
 
 	"github.com/coredns/coredns/plugin"
@@ -23,17 +25,25 @@ type Dnssec struct {
 	inflight  *singleflight.Group
 	cache     *cache.Cache
 	noCache   bool // when true, skip signature cache (cache_capacity 0)
+
+	// Simulated signing delay for controlled-cost experiments.
+	// The delay is injected inside singleflight.Do, after the real
+	// cryptographic operation, so it behaves like a slower algorithm.
+	simulatedDelay  time.Duration
+	simulatedStddev time.Duration
 }
 
 // New returns a new Dnssec.
-func New(zones []string, keys []*DNSKEY, splitkeys bool, next plugin.Handler, c *cache.Cache, capacity int) Dnssec {
+func New(zones []string, keys []*DNSKEY, splitkeys bool, next plugin.Handler, c *cache.Cache, capacity int, simDelay, simStddev time.Duration) Dnssec {
 	return Dnssec{Next: next,
-		zones:     zones,
-		keys:      keys,
-		splitkeys: splitkeys,
-		cache:     c,
-		noCache:   capacity <= 0,
-		inflight:  new(singleflight.Group),
+		zones:           zones,
+		keys:            keys,
+		splitkeys:       splitkeys,
+		cache:           c,
+		noCache:         capacity <= 0,
+		inflight:        new(singleflight.Group),
+		simulatedDelay:  simDelay,
+		simulatedStddev: simStddev,
 	}
 }
 
@@ -118,7 +128,13 @@ func (d Dnssec) sign(rrs []dns.RR, signerName string, ttl, incep, expir uint32, 
 	if ok {
 		return sgs, nil
 	}
+	// Track whether this goroutine was the singleflight leader (executed fn)
+	// or a coalesced waiter (shared the result).
+	var executed int32
 	sigs, err := d.inflight.Do(k, func() (interface{}, error) {
+		atomic.StoreInt32(&executed, 1)
+		start := time.Now()
+
 		var sigs []dns.RR
 		for _, k := range d.keys {
 			if d.splitkeys {
@@ -140,9 +156,29 @@ func (d Dnssec) sign(rrs []dns.RR, signerName string, ttl, incep, expir uint32, 
 			}
 			sigs = append(sigs, sig)
 		}
+		// Simulated signing delay: injected inside singleflight.Do so
+		// concurrent waiters experience the same queueing as a real
+		// slow algorithm would produce.
+		if d.simulatedDelay > 0 {
+			delay := d.simulatedDelay
+			if d.simulatedStddev > 0 {
+				jitter := time.Duration(rand.NormFloat64() * float64(d.simulatedStddev))
+				delay += jitter
+			}
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+		}
+
+		signDuration.WithLabelValues(server).Observe(time.Since(start).Seconds())
+		singleflightExecs.WithLabelValues(server).Inc()
+
 		d.set(k, sigs)
 		return sigs, nil
 	})
+	if atomic.LoadInt32(&executed) == 0 {
+		singleflightCoalesced.WithLabelValues(server).Inc()
+	}
 	return sigs.([]dns.RR), err
 }
 

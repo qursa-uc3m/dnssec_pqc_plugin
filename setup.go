@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/coredns/caddy"
 	"github.com/coredns/coredns/core/dnsserver"
@@ -18,13 +19,16 @@ var log = clog.NewWithPlugin("dnssec_pqc")
 func init() { plugin.Register("dnssec_pqc", setup) }
 
 func setup(c *caddy.Controller) error {
-	zones, keys, capacity, splitkeys, err := dnssecParse(c)
+	zones, keys, capacity, splitkeys, simDelay, simStddev, err := dnssecParse(c)
 	if err != nil {
 		return plugin.Error("dnssec_pqc", err)
 	}
 
 	ca := cache.New(capacity)
 	log.Infof("Signature cache capacity: %d (disabled: %t)", capacity, capacity <= 0)
+	if simDelay > 0 {
+		log.Infof("Simulated signing delay: %v (stddev: %v)", simDelay, simStddev)
+	}
 	stop := make(chan struct{})
 
 	c.OnShutdown(func() error {
@@ -37,21 +41,22 @@ func setup(c *caddy.Controller) error {
 	})
 
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
-		return New(zones, keys, splitkeys, next, ca, capacity)
+		return New(zones, keys, splitkeys, next, ca, capacity, simDelay, simStddev)
 	})
 
 	return nil
 }
 
-func dnssecParse(c *caddy.Controller) ([]string, []*DNSKEY, int, bool, error) {
+func dnssecParse(c *caddy.Controller) ([]string, []*DNSKEY, int, bool, time.Duration, time.Duration, error) {
 	zones := []string{}
 	keys := []*DNSKEY{}
 	capacity := defaultCap
+	var simDelay, simStddev time.Duration
 
 	i := 0
 	for c.Next() {
 		if i > 0 {
-			return nil, nil, 0, false, plugin.ErrOnce
+			return nil, nil, 0, false, 0, 0, plugin.ErrOnce
 		}
 		i++
 
@@ -63,21 +68,39 @@ func dnssecParse(c *caddy.Controller) ([]string, []*DNSKEY, int, bool, error) {
 			case "key":
 				k, e := keyParse(c)
 				if e != nil {
-					return nil, nil, 0, false, e
+					return nil, nil, 0, false, 0, 0, e
 				}
 				keys = append(keys, k...)
 			case "cache_capacity":
 				if !c.NextArg() {
-					return nil, nil, 0, false, c.ArgErr()
+					return nil, nil, 0, false, 0, 0, c.ArgErr()
 				}
 				value := c.Val()
 				cacheCap, err := strconv.Atoi(value)
 				if err != nil {
-					return nil, nil, 0, false, err
+					return nil, nil, 0, false, 0, 0, err
 				}
 				capacity = cacheCap
+			case "simulated_delay":
+				if !c.NextArg() {
+					return nil, nil, 0, false, 0, 0, c.ArgErr()
+				}
+				d, err := time.ParseDuration(c.Val())
+				if err != nil {
+					return nil, nil, 0, false, 0, 0, err
+				}
+				simDelay = d
+			case "simulated_stddev":
+				if !c.NextArg() {
+					return nil, nil, 0, false, 0, 0, c.ArgErr()
+				}
+				d, err := time.ParseDuration(c.Val())
+				if err != nil {
+					return nil, nil, 0, false, 0, 0, err
+				}
+				simStddev = d
 			default:
-				return nil, nil, 0, false, c.Errf("unknown property '%s'", x)
+				return nil, nil, 0, false, 0, 0, c.Errf("unknown property '%s'", x)
 			}
 		}
 	}
@@ -103,11 +126,11 @@ func dnssecParse(c *caddy.Controller) ([]string, []*DNSKEY, int, bool, error) {
 			}
 		}
 		if !ok {
-			return zones, keys, capacity, splitkeys, fmt.Errorf("key %s (keyid: %d) can not sign any of the zones", string(kname), k.tag)
+			return zones, keys, capacity, splitkeys, simDelay, simStddev, fmt.Errorf("key %s (keyid: %d) can not sign any of the zones", string(kname), k.tag)
 		}
 	}
 
-	return zones, keys, capacity, splitkeys, nil
+	return zones, keys, capacity, splitkeys, simDelay, simStddev, nil
 }
 
 func keyParse(c *caddy.Controller) ([]*DNSKEY, error) {
