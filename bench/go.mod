@@ -16,4 +16,4 @@ require (
 	golang.org/x/tools v0.22.0 // indirect
 )
 
-replace github.com/miekg/dns => github.com/qursa-uc3m/dns v1.1.63-0.20250710172324-2029d9fc17bf
+replace github.com/miekg/dns => github.com/qursa-uc3m/dns v1.1.63-0.20260323151137-30d7ff0208cb

@@ -164,15 +164,8 @@ func BenchmarkSign(b *testing.B) {
 		b.Run(alg.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				// Copy privRaw for PQC algorithms because SignWithPQC's
-				// oqs.Signature.Clean() zeroes the original slice via MemCleanse.
-				var privRaw []byte
-				if key.privRaw != nil {
-					privRaw = make([]byte, len(key.privRaw))
-					copy(privRaw, key.privRaw)
-				}
 				sig := newRRSIG(alg.dnsAlg, key.tag)
-				if err := sig.SignWithPQC(key.signer, rrset, privRaw); err != nil {
+				if err := sig.SignWithPQC(key.signer, rrset, key.privRaw); err != nil {
 					b.Fatal(err)
 				}
 			}

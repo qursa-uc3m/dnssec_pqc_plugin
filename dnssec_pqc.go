@@ -71,9 +71,13 @@ func (d Dnssec) Sign(state request.Request, now time.Time, server string) *dns.M
 		if len(ds) == 0 {
 			if sigs, err := d.nsec(state, mt, ttl, incep, expir, server); err == nil {
 				req.Ns = append(req.Ns, sigs...)
+			} else {
+				log.Warningf("Unsigned NSEC for delegation: zone=%s err=%v", state.Zone, err)
 			}
 		} else if sigs, err := d.sign(ds, state.Zone, ttl, incep, expir, server); err == nil {
 			req.Ns = append(req.Ns, sigs...)
+		} else {
+			log.Warningf("Unsigned DS: zone=%s err=%v", state.Zone, err)
 		}
 		return req
 	}
@@ -87,6 +91,8 @@ func (d Dnssec) Sign(state request.Request, now time.Time, server string) *dns.M
 
 		if sigs, err := d.sign(req.Ns, state.Zone, ttl, incep, expir, server); err == nil {
 			req.Ns = append(req.Ns, sigs...)
+		} else {
+			log.Warningf("Unsigned SOA: zone=%s err=%v", state.Zone, err)
 		}
 		if sigs, err := d.nsec(state, mt, ttl, incep, expir, server); err == nil {
 			req.Ns = append(req.Ns, sigs...)
@@ -105,18 +111,24 @@ func (d Dnssec) Sign(state request.Request, now time.Time, server string) *dns.M
 		ttl := r[0].Header().Ttl
 		if sigs, err := d.sign(r, state.Zone, ttl, incep, expir, server); err == nil {
 			req.Answer = append(req.Answer, sigs...)
+		} else {
+			log.Warningf("Unsigned Answer RRset: name=%s type=%d err=%v", r[0].Header().Name, r[0].Header().Rrtype, err)
 		}
 	}
 	for _, r := range rrSets(req.Ns) {
 		ttl := r[0].Header().Ttl
 		if sigs, err := d.sign(r, state.Zone, ttl, incep, expir, server); err == nil {
 			req.Ns = append(req.Ns, sigs...)
+		} else {
+			log.Warningf("Unsigned Ns RRset: name=%s type=%d err=%v", r[0].Header().Name, r[0].Header().Rrtype, err)
 		}
 	}
 	for _, r := range rrSets(req.Extra) {
 		ttl := r[0].Header().Ttl
 		if sigs, err := d.sign(r, state.Zone, ttl, incep, expir, server); err == nil {
 			req.Extra = append(req.Extra, sigs...)
+		} else {
+			log.Warningf("Unsigned Extra RRset: name=%s type=%d err=%v", r[0].Header().Name, r[0].Header().Rrtype, err)
 		}
 	}
 	return req
@@ -152,6 +164,9 @@ func (d Dnssec) sign(rrs []dns.RR, signerName string, ttl, incep, expir uint32, 
 			}
 			sig := k.newRRSIG(signerName, ttl, incep, expir)
 			if e := sig.SignWithPQC(k.s, rrs, k.privRaw); e != nil {
+				log.Errorf("SignWithPQC failed: alg=%d tag=%d name=%s rrtype=%d err=%v",
+					k.K.Algorithm, k.tag, rrs[0].Header().Name, rrs[0].Header().Rrtype, e)
+				signErrors.WithLabelValues(server).Inc()
 				return sigs, e
 			}
 			sigs = append(sigs, sig)

@@ -52,4 +52,11 @@ var (
 		Name:      "singleflight_execs_total",
 		Help:      "Number of actual signing executions (singleflight.Do leaders).",
 	}, []string{"server"})
+	// signErrors counts signing failures (e.g. SignWithPQC returning an error).
+	signErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: plugin.Namespace,
+		Subsystem: "dnssec_pqc",
+		Name:      "sign_errors_total",
+		Help:      "Number of signing errors from SignWithPQC.",
+	}, []string{"server"})
 )

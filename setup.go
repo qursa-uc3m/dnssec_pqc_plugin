@@ -29,6 +29,10 @@ func setup(c *caddy.Controller) error {
 	if simDelay > 0 {
 		log.Infof("Simulated signing delay: %v (stddev: %v)", simDelay, simStddev)
 	}
+	for _, k := range keys {
+		log.Infof("Loaded key: alg=%d tag=%d zone=%s ksk=%t zsk=%t privRawLen=%d",
+			k.K.Algorithm, k.tag, k.K.Header().Name, k.isKSK(), k.isZSK(), len(k.privRaw))
+	}
 	stop := make(chan struct{})
 
 	c.OnShutdown(func() error {
