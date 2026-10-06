@@ -11,7 +11,7 @@ func (k *DNSKEY) newRRSIG(signerName string, ttl, incep, expir uint32) *dns.RRSI
 	sig.KeyTag = k.tag
 	sig.SignerName = signerName
 	sig.Hdr.Ttl = ttl
-	sig.OrigTtl = origTTL
+	sig.OrigTtl = ttl
 
 	sig.Inception = incep
 	sig.Expiration = expir

@@ -173,6 +173,8 @@ func (d Dnssec) getDNSKEY(state request.Request, zone string, do bool, server st
 	incep, expir := incepExpir(time.Now().UTC())
 	if sigs, err := d.sign(keys, zone, 3600, incep, expir, server); err == nil {
 		m.Answer = append(m.Answer, sigs...)
+	} else {
+		return signingFailure(m)
 	}
 	return m
 }

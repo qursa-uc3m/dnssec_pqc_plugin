@@ -3,6 +3,7 @@
 package dnssec_pqc
 
 import (
+	"errors"
 	"math/rand"
 	"sync/atomic"
 	"time"
@@ -47,6 +48,14 @@ func New(zones []string, keys []*DNSKEY, splitkeys bool, next plugin.Handler, c 
 	}
 }
 
+func signingFailure(req *dns.Msg) *dns.Msg {
+	req.Rcode = dns.RcodeServerFailure
+	req.Answer = nil
+	req.Ns = nil
+	req.Extra = nil
+	return req
+}
+
 // Sign signs the message in state. it takes care of negative or nodata responses. It
 // uses NSEC black lies for authenticated denial of existence. For delegations it
 // will insert DS records and sign those.
@@ -72,12 +81,14 @@ func (d Dnssec) Sign(state request.Request, now time.Time, server string) *dns.M
 			if sigs, err := d.nsec(state, mt, ttl, incep, expir, server); err == nil {
 				req.Ns = append(req.Ns, sigs...)
 			} else {
-				log.Warningf("Unsigned NSEC for delegation: zone=%s err=%v", state.Zone, err)
+				log.Errorf("NSEC signing failed: zone=%s err=%v", state.Zone, err)
+				return signingFailure(req)
 			}
 		} else if sigs, err := d.sign(ds, state.Zone, ttl, incep, expir, server); err == nil {
 			req.Ns = append(req.Ns, sigs...)
 		} else {
-			log.Warningf("Unsigned DS: zone=%s err=%v", state.Zone, err)
+			log.Errorf("DS signing failed: zone=%s err=%v", state.Zone, err)
+			return signingFailure(req)
 		}
 		return req
 	}
@@ -92,10 +103,14 @@ func (d Dnssec) Sign(state request.Request, now time.Time, server string) *dns.M
 		if sigs, err := d.sign(req.Ns, state.Zone, ttl, incep, expir, server); err == nil {
 			req.Ns = append(req.Ns, sigs...)
 		} else {
-			log.Warningf("Unsigned SOA: zone=%s err=%v", state.Zone, err)
+			log.Errorf("SOA signing failed: zone=%s err=%v", state.Zone, err)
+			return signingFailure(req)
 		}
 		if sigs, err := d.nsec(state, mt, ttl, incep, expir, server); err == nil {
 			req.Ns = append(req.Ns, sigs...)
+		} else {
+			log.Errorf("NSEC signing failed: zone=%s err=%v", state.Zone, err)
+			return signingFailure(req)
 		}
 		if len(req.Ns) > 1 { // actually added nsec and sigs, reset the rcode
 			req.Rcode = dns.RcodeSuccess
@@ -112,7 +127,8 @@ func (d Dnssec) Sign(state request.Request, now time.Time, server string) *dns.M
 		if sigs, err := d.sign(r, state.Zone, ttl, incep, expir, server); err == nil {
 			req.Answer = append(req.Answer, sigs...)
 		} else {
-			log.Warningf("Unsigned Answer RRset: name=%s type=%d err=%v", r[0].Header().Name, r[0].Header().Rrtype, err)
+			log.Errorf("Answer signing failed: name=%s type=%d err=%v", r[0].Header().Name, r[0].Header().Rrtype, err)
+			return signingFailure(req)
 		}
 	}
 	for _, r := range rrSets(req.Ns) {
@@ -120,7 +136,8 @@ func (d Dnssec) Sign(state request.Request, now time.Time, server string) *dns.M
 		if sigs, err := d.sign(r, state.Zone, ttl, incep, expir, server); err == nil {
 			req.Ns = append(req.Ns, sigs...)
 		} else {
-			log.Warningf("Unsigned Ns RRset: name=%s type=%d err=%v", r[0].Header().Name, r[0].Header().Rrtype, err)
+			log.Errorf("Authority signing failed: name=%s type=%d err=%v", r[0].Header().Name, r[0].Header().Rrtype, err)
+			return signingFailure(req)
 		}
 	}
 	for _, r := range rrSets(req.Extra) {
@@ -128,7 +145,8 @@ func (d Dnssec) Sign(state request.Request, now time.Time, server string) *dns.M
 		if sigs, err := d.sign(r, state.Zone, ttl, incep, expir, server); err == nil {
 			req.Extra = append(req.Extra, sigs...)
 		} else {
-			log.Warningf("Unsigned Extra RRset: name=%s type=%d err=%v", r[0].Header().Name, r[0].Header().Rrtype, err)
+			log.Errorf("Additional signing failed: name=%s type=%d err=%v", r[0].Header().Name, r[0].Header().Rrtype, err)
+			return signingFailure(req)
 		}
 	}
 	return req
@@ -138,16 +156,22 @@ func (d Dnssec) sign(rrs []dns.RR, signerName string, ttl, incep, expir uint32, 
 	k := hash(rrs)
 	sgs, ok := d.get(k, server)
 	if ok {
-		return sgs, nil
+		return copySignatures(sgs), nil
 	}
 	// Track whether this goroutine was the singleflight leader (executed fn)
 	// or a coalesced waiter (shared the result).
 	var executed int32
 	sigs, err := d.inflight.Do(k, func() (interface{}, error) {
 		atomic.StoreInt32(&executed, 1)
+		signInflight.Inc()
+		defer signInflight.Dec()
 		start := time.Now()
 
 		var sigs []dns.RR
+		if len(d.keys) == 0 {
+			signErrors.WithLabelValues(server).Inc()
+			return sigs, errors.New("no DNSSEC signing key")
+		}
 		for _, k := range d.keys {
 			if d.splitkeys {
 				if len(rrs) > 0 && rrs[0].Header().Rrtype == dns.TypeDNSKEY {
@@ -170,6 +194,10 @@ func (d Dnssec) sign(rrs []dns.RR, signerName string, ttl, incep, expir uint32, 
 				return sigs, e
 			}
 			sigs = append(sigs, sig)
+		}
+		if len(sigs) == 0 {
+			signErrors.WithLabelValues(server).Inc()
+			return sigs, errors.New("no applicable DNSSEC signing key")
 		}
 		// Simulated signing delay: injected inside singleflight.Do so
 		// concurrent waiters experience the same queueing as a real
@@ -194,14 +222,26 @@ func (d Dnssec) sign(rrs []dns.RR, signerName string, ttl, incep, expir uint32, 
 	if atomic.LoadInt32(&executed) == 0 {
 		singleflightCoalesced.WithLabelValues(server).Inc()
 	}
-	return sigs.([]dns.RR), err
+	return copySignatures(sigs.([]dns.RR)), err
+}
+
+// Each response owns its records. Downstream response caching ages TTL fields;
+// neither the signature cache nor singleflight callers may share those writes.
+func copySignatures(sigs []dns.RR) []dns.RR {
+	copies := make([]dns.RR, len(sigs))
+	for i, sig := range sigs {
+		copies[i] = dns.Copy(sig)
+	}
+	return copies
 }
 
 func (d Dnssec) set(key uint64, sigs []dns.RR) {
 	if d.noCache {
 		return
 	}
-	d.cache.Add(key, sigs)
+	if d.cache.Add(key, sigs) {
+		cacheEvictions.Inc()
+	}
 }
 
 func (d Dnssec) get(key uint64, server string) ([]dns.RR, bool) {

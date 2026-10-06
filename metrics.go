@@ -8,6 +8,14 @@ import (
 )
 
 var (
+	cacheEvictions = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: plugin.Namespace, Subsystem: "dnssec_pqc", Name: "cache_evictions_total",
+		Help: "Signature cache insertions that evicted an existing entry in this process.",
+	})
+	signInflight = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: plugin.Namespace, Subsystem: "dnssec_pqc", Name: "sign_inflight",
+		Help: "Signing leaders still executing in this process.",
+	})
 	// cacheSize is the number of elements in the dnssec cache.
 	cacheSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: plugin.Namespace,
